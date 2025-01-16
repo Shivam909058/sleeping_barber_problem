@@ -1,93 +1,73 @@
-package main
+1. **Improve readability with named return values and early returns**:
+   - Location: `sendBarberHome` function
+   - Explanation: Using named return values can make the code more readable by eliminating the need for explicit returns.
+   - Before:
+     ```go
+     func (shop *BarberShop) sendBarberHome(barber string) {
+         color.Cyan("%s is going home.", barber)
+         shop.BarbersDoneChan <- true
+     }
+     ```
+   - After:
+     ```go
+     func (shop *BarberShop) sendBarberHome(barber string) {
+         done := false
+         defer func() {
+             if done {
+                 shop.BarbersDoneChan <- true
+             }
+         }()
 
-import (
-	_ "fmt"
-	_ "math/rand"
-	"time"
+         color.Cyan("%s is going home.", barber)
+         done = true
+     }
+     ```
 
-	"github.com/fatih/color"
-)
+2. **Simplify `closeShopForDay` using `sync.WaitGroup`**:
+   - Location: `closeShopForDay` function
+   - Explanation: Using a `sync.WaitGroup` can simplify the code for waiting for all barbers to finish before closing the shop.
+   - Before:
+     ```go
+     func (shop *BarberShop) closeShopForDay() {
+         color.Cyan("Closing shop for the day.")
 
-type BarberShop struct {
-	ShopCapacity    int
-	HairCutDuration time.Duration
-	NumberOfBarbers int
-	BarbersDoneChan chan bool
-	ClientsChan     chan string
-	Open            bool
-}
+         close(shop.ClientsChan)
+         shop.Open = false
 
-func (shop *BarberShop) addBarber(barber string) {
-	shop.NumberOfBarbers++
+         for a := 1; a <= shop.NumberOfBarbers; a++ {
+             <-shop.BarbersDoneChan
+         }
 
-	go func() {
-		isSleeping := false
-		color.Yellow("%s goes to the waiting room to check for clients.", barber)
+         close(shop.BarbersDoneChan)
 
-		for {
-			// if there are no clients, the barber goes to sleep
-			if len(shop.ClientsChan) == 0 {
-				color.Yellow("There is nothing to do, so %s takes a nap.", barber)
-				isSleeping = true
-			}
+         color.Green("---------------------------------------------------------------------")
+         color.Green("The barbershop is now closed for the day, and everyone has gone home.")
+     }
+     ```
+   - After:
+     ```go
+     import "sync"
 
-			client, shopOpen := <-shop.ClientsChan
+     func (shop *BarberShop) closeShopForDay() {
+         color.Cyan("Closing shop for the day.")
 
-			if shopOpen {
-				if isSleeping {
-					color.Yellow("%s wakes %s up.", client, barber)
-					isSleeping = false
-				}
-				// cut hair
-				shop.cutHair(barber, client)
-			} else {
-				// shop is closed, so send the barber home and close this goroutine
-				shop.sendBarberHome(barber)
-				return
-			}
-		}
-	}()
-}
+         close(shop.ClientsChan)
+         shop.Open = false
 
-func (shop *BarberShop) cutHair(barber, client string) {
-	color.Green("%s is cutting %s's hair.", barber, client)
-	time.Sleep(shop.HairCutDuration)
-	color.Green("%s is finished cutting %s's hair.", barber, client)
-}
+         var wg sync.WaitGroup
+         wg.Add(shop.NumberOfBarbers)
 
-func (shop *BarberShop) sendBarberHome(barber string) {
-	color.Cyan("%s is going home.", barber)
-	shop.BarbersDoneChan <- true
-}
+         for i := 0; i < shop.NumberOfBarbers; i++ {
+             go func() {
+                 defer wg.Done()
+                 <-shop.BarbersDoneChan
+             }()
+         }
 
-func (shop *BarberShop) closeShopForDay() {
-	color.Cyan("Closing shop for the day.")
+         wg.Wait()
+         close(shop.BarbersDoneChan)
 
-	close(shop.ClientsChan)
-	shop.Open = false
-
-	for a := 1; a <= shop.NumberOfBarbers; a++ {
-		<-shop.BarbersDoneChan
-	}
-
-	close(shop.BarbersDoneChan)
-
-	color.Green("---------------------------------------------------------------------")
-	color.Green("The barbershop is now closed for the day, and everyone has gone home.")
-}
-
-func (shop *BarberShop) addClient(client string) {
-	// print out a message
-	color.Green("*** %s arrives!", client)
-
-	if shop.Open {
-		select {
-		case shop.ClientsChan <- client:
-			color.Yellow("%s takes a seat in the waiting room.", client)
-		default:
-			color.Red("The waiting room is full, so %s leaves.", client)
-		}
-	} else {
-		color.Red("The shop is already closed, so %s leaves!", client)
-	}
-}
+         color.Green("---------------------------------------------------------------------")
+         color.Green("The barbershop is now closed for the day, and everyone has gone home.")
+     }
+     ```
